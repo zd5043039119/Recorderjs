@@ -90,7 +90,7 @@ var Recorder = exports.Recorder = function () {
             record(e.data.buffer);
             break;
           case 'exportWAV':
-            exportWAV(e.data.type, this.config.sampleRate);
+            exportWAV(e.data.type, _this.config.sampleRate);
             break;
           case 'getBuffer':
             getBuffer();
