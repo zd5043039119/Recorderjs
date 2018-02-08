@@ -28,7 +28,7 @@ var _inlineWorker = require('inline-worker');
 var _inlineWorker2 = _interopRequireDefault(_inlineWorker);
 
 function _interopRequireDefault(obj) {
-  return obj && obj.__esModule ? obj : { default: obj };
+  return obj && obj.__esModule ? obj : {default: obj};
 }
 
 function _classCallCheck(instance, Constructor) {
@@ -37,12 +37,48 @@ function _classCallCheck(instance, Constructor) {
   }
 }
 
+function initRecorder(recorder) {
+  var source = new AudioContext().createMediaStreamSource(recorder.stream);
+  recorder.context = source.context;
+  recorder.node = (recorder.context.createScriptProcessor || recorder.context.createJavaScriptNode).call(recorder.context, recorder.config.bufferLen, recorder.config.numChannels, recorder.config.numChannels);
+  recorder.node.onaudioprocess = function (e) {
+    if (!recorder.recording) return;
+
+    var buffer = [];
+    for (var channel = 0; channel < recorder.config.numChannels; channel++) {
+      var data = e.inputBuffer.getChannelData(channel)
+      if (channel === 0) {
+        var l = Math.floor(data.length / 10);
+        var vol = 0;
+        for (var i = 0; i < l; i++) {
+          vol += Math.abs(data[i * 10]);
+        }
+        if (vol < 30) {
+          recorder.emptyCheckCount++;
+        } else {
+          recorder.emptyCheckCount = 0;
+        }
+      }
+      buffer.push(data);
+    }
+    if (recorder.emptyCheckCount > 15) {
+      recorder.stop(true);
+    } else {
+      recorder.worker.postMessage({
+        command: 'record',
+        buffer: buffer
+      });
+    }
+  };
+  source.connect(recorder.node);
+  recorder.node.connect(recorder.context.destination);
+}
+
 var Recorder = exports.Recorder = function () {
-  function Recorder(source, cfg) {
+  function Recorder(mediaStream, cfg) {
     var _this = this;
-
+    this.stream = mediaStream;
     _classCallCheck(this, Recorder);
-
     this.config = {
       bufferLen: 4096,
       numChannels: 2,
@@ -51,36 +87,19 @@ var Recorder = exports.Recorder = function () {
     this.recording = false;
     this.callbacks = {
       getBuffer: [],
-      exportWAV: []
+      exportWAV: [],
+      stop: []
     };
-
     Object.assign(this.config, cfg);
-    this.context = source.context;
-    this.node = (this.context.createScriptProcessor || this.context.createJavaScriptNode).call(this.context, this.config.bufferLen, this.config.numChannels, this.config.numChannels);
-
-    this.node.onaudioprocess = function (e) {
-      if (!_this.recording) return;
-
-      var buffer = [];
-      for (var channel = 0; channel < _this.config.numChannels; channel++) {
-        buffer.push(e.inputBuffer.getChannelData(channel));
-      }
-      _this.worker.postMessage({
-        command: 'record',
-        buffer: buffer
-      });
-    };
-
-    source.connect(this.node);
-    this.node.connect(this.context.destination); //this should not be necessary
-
+    this.emptyCheckCount = 0;
+    initRecorder(_this);
     var self = {};
     this.worker = new _inlineWorker2.default(function () {
       var recLength = 0,
-          recBuffers = [],
-          sampleRate = void 0,
-          numChannels = void 0,
-          rate = void 0;
+        recBuffers = [],
+        sampleRate = void 0,
+        numChannels = void 0,
+        rate = void 0;
 
       this.onmessage = function (e) {
         switch (e.data.command) {
@@ -131,7 +150,7 @@ var Recorder = exports.Recorder = function () {
         while (offsetResult < result.length) {
           var nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
           var accum = 0,
-              count = 0;
+            count = 0;
           for (var i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
             accum += buffer[i];
             count++;
@@ -156,9 +175,9 @@ var Recorder = exports.Recorder = function () {
         }
         interleaved = downsampleBuffer(interleaved);
         var dataview = encodeWAV(interleaved);
-        var audioBlob = new Blob([dataview], { type: type });
+        var audioBlob = new Blob([dataview], {type: type});
 
-        this.postMessage({ command: 'exportWAV', data: audioBlob });
+        this.postMessage({command: 'exportWAV', data: audioBlob});
       }
 
       function getBuffer() {
@@ -166,7 +185,7 @@ var Recorder = exports.Recorder = function () {
         for (var channel = 0; channel < numChannels; channel++) {
           buffers.push(mergeBuffers(recBuffers[channel], recLength));
         }
-        this.postMessage({ command: 'getBuffer', data: buffers });
+        this.postMessage({command: 'getBuffer', data: buffers});
       }
 
       function clear() {
@@ -196,7 +215,7 @@ var Recorder = exports.Recorder = function () {
         var result = new Float32Array(length);
 
         var index = 0,
-            inputIndex = 0;
+          inputIndex = 0;
 
         while (index < length) {
           result[index++] = inputL[inputIndex];
@@ -256,7 +275,6 @@ var Recorder = exports.Recorder = function () {
       }
     }, self);
 
-    console.log(1)
     this.worker.postMessage({
       command: 'init',
       config: {
@@ -277,17 +295,25 @@ var Recorder = exports.Recorder = function () {
   _createClass(Recorder, [{
     key: 'record',
     value: function record() {
+      if (this.context.state === 'closed') {
+        initRecorder(this);
+      }
+      this.emptyCheckCount = 0;
       this.recording = true;
     }
   }, {
     key: 'stop',
-    value: function stop() {
+    value: function stop(executeCallback) {
       this.recording = false;
+      this.context.close();
+      if (executeCallback && this.config.stopCallback) {
+        this.config.stopCallback();
+      }
     }
   }, {
     key: 'clear',
     value: function clear() {
-      this.worker.postMessage({ command: 'clear' });
+      this.worker.postMessage({command: 'clear'});
     }
   }, {
     key: 'getBuffer',
@@ -297,7 +323,7 @@ var Recorder = exports.Recorder = function () {
 
       this.callbacks.getBuffer.push(cb);
 
-      this.worker.postMessage({ command: 'getBuffer' });
+      this.worker.postMessage({command: 'getBuffer'});
     }
   }, {
     key: 'exportWAV',
