@@ -85,7 +85,8 @@ var Recorder = exports.Recorder = function () {
       var recLength = 0,
           recBuffers = [],
           sampleRate = void 0,
-          numChannels = void 0;
+          numChannels = void 0,
+          rate = void 0;
 
       this.onmessage = function (e) {
         switch (e.data.command) {
@@ -96,7 +97,7 @@ var Recorder = exports.Recorder = function () {
             record(e.data.buffer);
             break;
           case 'exportWAV':
-            exportWAV(e.data.type, this.config.sampleRate);
+            exportWAV(e.data.type);
             break;
           case 'getBuffer':
             getBuffer();
@@ -110,6 +111,7 @@ var Recorder = exports.Recorder = function () {
       function init(config) {
         sampleRate = config.sampleRate;
         numChannels = config.numChannels;
+        rate = config.rate;
         initBuffers();
       }
 
@@ -120,7 +122,7 @@ var Recorder = exports.Recorder = function () {
         recLength += inputBuffer[0].length;
       }
 
-      function downsampleBuffer(buffer, rate) {
+      function downsampleBuffer(buffer) {
         if (rate == sampleRate) {
           return buffer;
         }
@@ -147,7 +149,7 @@ var Recorder = exports.Recorder = function () {
         return result;
       }
 
-      function exportWAV(type, rate) {
+      function exportWAV(type) {
         var buffers = [];
         for (var channel = 0; channel < numChannels; channel++) {
           buffers.push(mergeBuffers(recBuffers[channel], recLength));
@@ -158,8 +160,8 @@ var Recorder = exports.Recorder = function () {
         } else {
           interleaved = buffers[0];
         }
-        interleaved = downsampleBuffer(interleaved, rate);
-        var dataview = encodeWAV(interleaved, rate);
+        interleaved = downsampleBuffer(interleaved);
+        var dataview = encodeWAV(interleaved);
         var audioBlob = new Blob([dataview], { type: type });
 
         this.postMessage({ command: 'exportWAV', data: audioBlob });
@@ -223,7 +225,7 @@ var Recorder = exports.Recorder = function () {
         }
       }
 
-      function encodeWAV(samples, rate) {
+      function encodeWAV(samples) {
         var buffer = new ArrayBuffer(44 + samples.length * 2);
         var view = new DataView(buffer);
 
@@ -260,11 +262,13 @@ var Recorder = exports.Recorder = function () {
       }
     }, self);
 
+    console.log(1);
     this.worker.postMessage({
       command: 'init',
       config: {
         sampleRate: this.context.sampleRate,
-        numChannels: this.config.numChannels
+        numChannels: this.config.numChannels,
+        rate: this.config.sampleRate
       }
     });
 
