@@ -39,7 +39,7 @@ function _classCallCheck(instance, Constructor) {
 
 function initRecorder(recorder) {
   var audioContext = window.AudioContext || window.webkitAudioContext;
-  var source = new AudioContext().createMediaStreamSource(recorder.stream);
+  var source = new audioContext().createMediaStreamSource(recorder.stream);
   recorder.context = source.context;
   recorder.node = (recorder.context.createScriptProcessor || recorder.context.createJavaScriptNode).call(recorder.context, recorder.config.bufferLen, recorder.config.numChannels, recorder.config.numChannels);
   recorder.node.onaudioprocess = function (e) {
